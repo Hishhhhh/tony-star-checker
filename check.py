@@ -5,7 +5,6 @@ import requests
 APIFY_TOKEN = os.environ.get("APIFY_TOKEN")
 APIFY_TASK_ID = os.environ.get("APIFY_TASK_ID")
 
-# Clean target profile URL
 RAW_URL = "https://www.facebook.com/profile.php?id=61593822099768"
 STATE_FILE = "latest_post.txt"
 
@@ -31,34 +30,36 @@ def trigger_apify():
 def main():
     last_seen = get_last_seen()
 
-    # Route through mobile endpoint for static server-rendered HTML
-    mobile_url = RAW_URL.replace("www.facebook.com", "mbasic.facebook.com").replace("web.facebook.com", "mbasic.facebook.com")
-    if "facebook.com" in mobile_url and "mbasic." not in mobile_url:
-        mobile_url = mobile_url.replace("facebook.com", "mbasic.facebook.com")
-
     headers = {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-User": "?1",
+        "Sec-Fetch-Dest": "document"
     }
 
     try:
         session = requests.Session()
-        res = session.get(mobile_url, headers=headers, timeout=15)
+        res = session.get(RAW_URL, headers=headers, timeout=15)
         
-        # 1. Match standard post/story/photo IDs
-        matches = re.findall(r'(?:story_fbid=|fbid=|posts/|videos/|reel/)([0-9]{8,})', res.text)
-        
-        # 2. Fallback: match encoded story targets
+        # Check the page title Meta handed back
+        title_match = re.search(r'<title>(.*?)</title>', res.text, re.IGNORECASE)
+        page_title = title_match.group(1) if title_match else "No <title> found"
+        print(f"Page title returned by FB: '{page_title}'")
+        print(f"Final URL: {res.url}")
+
+        # Scan for post IDs across common Facebook web patterns
+        matches = re.findall(r'/(?:posts|reel|videos)/([0-9]{8,})', res.text)
         if not matches:
-            matches = re.findall(r'story\.php\?story_fbid=([0-9]+)', res.text)
+            matches = re.findall(r'"post_id":"([0-9]+)"', res.text)
+        if not matches:
+            matches = re.findall(r'story_fbid=([0-9]+)', res.text)
 
         if not matches:
-            # Check if Meta served an explicit checkpoint/login redirect
-            if "login" in res.url:
-                print("Facebook redirected request to a login wall.")
-            else:
-                print("No post IDs found on this pass. HTML snippet length:", len(res.text))
+            print("No post IDs parsed. First 500 characters of response:")
+            print(res.text[:500].replace('\n', ' '))
             return
 
         latest_id = matches[0]
