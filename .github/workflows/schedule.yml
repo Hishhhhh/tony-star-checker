@@ -7,13 +7,13 @@ jobs:
   check:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Allows runner to save latest_post.txt
+      contents: write
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: setup-python@v5
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
