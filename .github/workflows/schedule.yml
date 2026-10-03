@@ -2,8 +2,10 @@ name: Check FB Profile Updates
 
 on:
   schedule:
-    - cron: '7,22,37,52 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch:
+  repository_dispatch:
+    types: [check-now]
 
 jobs:
   check:
