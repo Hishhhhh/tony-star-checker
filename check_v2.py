@@ -1,6 +1,7 @@
 import os
 import re
 import requests
+import time
 
 APIFY_TOKEN = os.environ.get("APIFY_TOKEN")
 APIFY_TASK_ID = os.environ.get("APIFY_TASK_ID")
@@ -78,6 +79,7 @@ def process_and_send_posts():
                 print(f"Failed to post {post_id} to Make: {err}")
         # Add to seen IDs once sent
         seen_ids.add(post_id)
+        time.sleep(2)  # Gives Discord time to breathe between messages
 
     save_seen_ids(seen_ids)
     print("Finished. Updated seen_ids.txt.")
