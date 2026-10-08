@@ -1,12 +1,24 @@
 import os
+import re
 import requests
 
 APIFY_TOKEN = os.environ.get("APIFY_TOKEN")
-ACTOR_ID = os.environ.get("APIFY_ACTOR_ID")  # Or your specific task ID
+APIFY_TASK_ID = os.environ.get("APIFY_TASK_ID")
 MAKE_TEST_WEBHOOK_URL = os.environ.get("MAKE_TEST_WEBHOOK_URL")
 
+RAW_URL = "https://www.facebook.com/profile.php?id=61593822099768"
+STATE_FILE = "latest_post_v2.txt"
 SEEN_FILE = "seen_ids.txt"
-LATEST_POST_FILE = "latest_post_v2.txt"
+
+def get_last_seen():
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    return ""
+
+def save_last_seen(post_id):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        f.write(post_id)
 
 def load_seen_ids():
     if not os.path.exists(SEEN_FILE):
@@ -19,49 +31,102 @@ def save_seen_ids(seen_ids):
         for post_id in sorted(seen_ids):
             f.write(f"{post_id}\n")
 
-def run_apify_and_get_items():
-    # Runs the actor/task synchronously and returns the items directly
-    # If using an actor: https://api.apify.com/v2/acts/{ACTOR_ID}/run-sync-get-dataset-items
-    # If using a task:  https://api.apify.com/v2/actor-tasks/{ACTOR_ID}/run-sync-get-dataset-items
-    url = f"https://api.apify.com/v2/acts/{ACTOR_ID}/run-sync-get-dataset-items?token={APIFY_TOKEN}"
+def fetch_apify_task_results():
+    print("Change detected on profile! Running Apify task synchronously...")
+    # This runs the task and directly waits to return the items in 1 request
+    endpoint = f"https://api.apify.com/v2/actor-tasks/{APIFY_TASK_ID}/run-sync-get-dataset-items?token={APIFY_TOKEN}"
+    response = requests.post(endpoint, json={}, timeout=180)
     
-    # Send empty payload {} if your task already has saved input settings
-    payload = {} 
-    
-    response = requests.post(url, json=payload, timeout=120)
-    response.raise_for_status()
-    return response.json()
+    if response.status_code in [200, 201]:
+        print("Apify run finished successfully. Processing dataset...")
+        return response.json()
+    else:
+        print(f"Failed to run Apify: {response.status_code} - {response.text}")
+        return []
 
-def main():
-    # 1. Your existing check logic runs here to see if the profile text/content changed.
-    # If a change is detected:
-    
-    seen_ids = load_seen_ids()
-    scraped_posts = run_apify_and_get_items()
-    
-    new_posts = []
-    for post in scraped_posts:
-        # Check whatever unique ID key your Apify actor outputs
-        post_id = str(post.get("id") or post.get("postId") or post.get("url"))
-        if post_id and post_id not in seen_ids:
-            new_posts.append(post)
-            seen_ids.add(post_id)
-
-    if not new_posts:
-        print("Profile changed, but all posts already recorded (e.g. deletion). Zero Make ops used.")
+def process_and_send_posts():
+    scraped_posts = fetch_apify_task_results()
+    if not scraped_posts:
+        print("Apify returned 0 posts or failed.")
         return
 
-    print(f"Found {len(new_posts)} new post(s). Sending to Make...")
-    
-    # Reverse list so oldest post is sent first, newest post last
+    seen_ids = load_seen_ids()
+    new_posts = []
+
+    for post in scraped_posts:
+        # Pull whatever ID key Apify provides (id, postId, url, etc.)
+        post_id = str(post.get("id") or post.get("postId") or post.get("postUrl") or post.get("url") or "")
+        if post_id and post_id not in seen_ids:
+            new_posts.append((post_id, post))
+
+    if not new_posts:
+        print("Profile change detected, but every post was already in seen_ids.txt (likely a deletion).")
+        print("Skipped calling Make. 0 Make operations used.")
+        return
+
+    print(f"Found {len(new_posts)} genuine new post(s)! Sending to Make...")
+
+    # Reverse so the oldest post posts first, newest last
     new_posts.reverse()
 
-    for post in new_posts:
+    for post_id, post_data in new_posts:
         if MAKE_TEST_WEBHOOK_URL:
-            requests.post(MAKE_TEST_WEBHOOK_URL, json=post, timeout=30)
+            try:
+                res = requests.post(MAKE_TEST_WEBHOOK_URL, json=post_data, timeout=30)
+                print(f"Sent post {post_id} to Make: status {res.status_code}")
+            except Exception as err:
+                print(f"Failed to post {post_id} to Make: {err}")
+        # Add to seen IDs once sent
+        seen_ids.add(post_id)
 
     save_seen_ids(seen_ids)
-    print("Done. Saved new IDs.")
+    print("Finished. Updated seen_ids.txt.")
+
+def main():
+    last_seen = get_last_seen()
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-User": "?1",
+        "Sec-Fetch-Dest": "document"
+    }
+
+    try:
+        session = requests.Session()
+        res = session.get(RAW_URL, headers=headers, timeout=15)
+        
+        title_match = re.search(r'<title>(.*?)</title>', res.text, re.IGNORECASE)
+        page_title = title_match.group(1) if title_match else "No <title> found"
+        print(f"Page title returned by FB: '{page_title}'")
+        print(f"Final URL: {res.url}")
+
+        matches = re.findall(r'/(?:posts|reel|videos)/([0-9]{8,})', res.text)
+        if not matches:
+            matches = re.findall(r'"post_id":"([0-9]+)"', res.text)
+        if not matches:
+            matches = re.findall(r'story_fbid=([0-9]+)', res.text)
+
+        if not matches:
+            print("No post IDs parsed. First 500 characters of response:")
+            print(res.text[:500].replace('\n', ' '))
+            return
+
+        latest_id = matches[0]
+        print(f"Latest post ID seen: {latest_id}")
+
+        if latest_id != last_seen:
+            print(f"Change detected! (Old: '{last_seen}' -> New: '{latest_id}')")
+            save_last_seen(latest_id)
+            process_and_send_posts()
+        else:
+            print(f"No new post detected (current ID matches '{latest_id}'). Exiting.")
+
+    except Exception as e:
+        print(f"Error checking profile: {e}")
 
 if __name__ == "__main__":
     main()
