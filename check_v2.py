@@ -75,4 +75,67 @@ def process_and_send_posts():
                 res = requests.post(MAKE_TEST_WEBHOOK_URL, json=post_data, timeout=30)
                 print(f"Sent post {post_id} to Make: status {res.status_code}")
             except Exception as err:
-                print(f
+                print(f"Failed to post {post_id} to Make: {err}")
+        # Add to seen IDs once sent
+        seen_ids.add(post_id)
+
+    save_seen_ids(seen_ids)
+    print("Finished. Updated seen_ids.txt.")
+
+def main():
+    last_seen = get_last_seen()
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-User": "?1",
+        "Sec-Fetch-Dest": "document"
+    }
+
+    try:
+        session = requests.Session()
+        res = session.get(RAW_URL, headers=headers, timeout=15)
+        
+        title_match = re.search(r'<title>(.*?)</title>', res.text, re.IGNORECASE)
+        page_title = title_match.group(1) if title_match else "No <title> found"
+        print(f"Page title returned by FB: '{page_title}'")
+        print(f"Final URL: {res.url}")
+
+        matches = re.findall(r'/(?:posts|reel|videos)/([0-9]{8,})', res.text)
+        if not matches:
+            matches = re.findall(r'"post_id":"([0-9]+)"', res.text)
+        if not matches:
+            matches = re.findall(r'story_fbid=([0-9]+)', res.text)
+
+        if not matches:
+            print("No post IDs parsed. First 500 characters of response:")
+            print(res.text[:500].replace('\n', ' '))
+            return
+
+        latest_id = matches[0]
+        print(f"Latest post ID seen: {latest_id}")
+
+        if latest_id != last_seen:
+            print(f"Change detected! (Old: '{last_seen}' -> New: '{latest_id}')")
+            
+            # Check if this ID has already been seen in history (deletion guard)
+            seen_ids = load_seen_ids()
+            if latest_id in seen_ids:
+                print(f"Post {latest_id} is already in seen_ids.txt — a newer post was likely deleted.")
+                print("Updating latest_post_v2.txt without running Apify. 0 Apify spend, 0 Make ops!")
+                save_last_seen(latest_id)
+                return
+
+            save_last_seen(latest_id)
+            process_and_send_posts()
+        else:
+            print(f"No new post detected (current ID matches '{latest_id}'). Exiting.")
+
+    except Exception as e:
+        print(f"Error checking profile: {e}")
+
+if __name__ == "__main__":
+    main()
