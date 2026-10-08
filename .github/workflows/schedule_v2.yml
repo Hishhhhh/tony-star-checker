@@ -1,0 +1,35 @@
+name: Test FB Profile Updates v2
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [check-now-v2]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run v2 check script
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          APIFY_ACTOR_ID: ${{ secrets.APIFY_ACTOR_ID }}
+          MAKE_TEST_WEBHOOK_URL: ${{ secrets.MAKE_TEST_WEBHOOK_URL }}
+        run: python check_v2.py
+
+      - name: Commit tracking files
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add latest_post_v2.txt seen_ids.txt
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update v2 tracking files [skip ci]" && git push)
