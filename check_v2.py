@@ -92,11 +92,21 @@ def send_to_discord(post_data):
     image_url = None
     media = post_data.get("media")
     if isinstance(media, list) and len(media) > 0 and isinstance(media[0], dict):
-        image_url = media[0].get("thumbnail") or media[0].get("url")
-    elif post_data.get("thumbnail"):
-        image_url = post_data.get("thumbnail")
+        first_media = media[0]
+        # Prioritize full/original image URLs before falling back to thumbnail
+        image_url = (
+            first_media.get("url")
+            or first_media.get("originalUrl")
+            or first_media.get("largeUrl")
+            or first_media.get("link")
+            or first_media.get("thumbnail")
+        )
     elif post_data.get("imageUrl"):
         image_url = post_data.get("imageUrl")
+    elif post_data.get("url") and any(ext in post_data.get("url", "").lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
+        image_url = post_data.get("url")
+    elif post_data.get("thumbnail"):
+        image_url = post_data.get("thumbnail")
 
     # Image branch: Download raw bytes & upload to Discord as a permanent native attachment
     if image_url:
