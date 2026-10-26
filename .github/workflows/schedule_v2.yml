@@ -25,6 +25,7 @@ jobs:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           APIFY_TASK_ID: ${{ secrets.APIFY_TASK_ID }}
           MAKE_TEST_WEBHOOK_URL: ${{ secrets.MAKE_TEST_WEBHOOK_URL }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python check_v2.py
 
       - name: Commit tracking files
