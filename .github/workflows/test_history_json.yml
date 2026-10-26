@@ -20,11 +20,12 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: pip install requests urllib3
+        run: pip install requests urllib3 yt-dlp
 
       - name: Execute Delivery Test
         env:
           TEST_DISCORD_WEBHOOK_URL: ${{ secrets.TEST_DISCORD_WEBHOOK_URL }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           POST_JSON_DATA: ${{ github.event.inputs.post_json }}
         run: |
           python test_json_delivery.py
