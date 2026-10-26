@@ -1,4 +1,4 @@
-name: Test FB Profile Updates v2
+name: FB Profile Updates v2
 
 on:
   schedule:
