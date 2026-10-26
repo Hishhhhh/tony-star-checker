@@ -93,18 +93,19 @@ def send_to_discord(post_data):
     media = post_data.get("media")
     if isinstance(media, list) and len(media) > 0 and isinstance(media[0], dict):
         first_media = media[0]
-        # Prioritize full/original image URLs before falling back to thumbnail
-        image_url = (
-            first_media.get("url")
-            or first_media.get("originalUrl")
-            or first_media.get("largeUrl")
-            or first_media.get("link")
-            or first_media.get("thumbnail")
-        )
+        # Only select actual image assets
+        candidates = [
+            first_media.get("thumbnail"),
+            first_media.get("largeUrl"),
+            first_media.get("originalUrl"),
+            post_data.get("imageUrl")
+        ]
+        for candidate in candidates:
+            if candidate and ("fbcdn.net" in candidate or any(ext in candidate.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"])):
+                image_url = candidate
+                break
     elif post_data.get("imageUrl"):
         image_url = post_data.get("imageUrl")
-    elif post_data.get("url") and any(ext in post_data.get("url", "").lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
-        image_url = post_data.get("url")
     elif post_data.get("thumbnail"):
         image_url = post_data.get("thumbnail")
 
