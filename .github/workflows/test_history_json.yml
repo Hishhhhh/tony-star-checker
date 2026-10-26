@@ -24,7 +24,7 @@ jobs:
 
       - name: Execute Delivery Test
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TEST_DISCORD_WEBHOOK_URL: ${{ secrets.TEST_DISCORD_WEBHOOK_URL }}
           POST_JSON_DATA: ${{ github.event.inputs.post_json }}
         run: |
           python test_json_delivery.py
