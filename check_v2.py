@@ -85,62 +85,93 @@ def send_to_discord(post_data):
         f"<{post_url}>",
         "",
         post_text,
-        "\u200b"  # Invisible character that forces Discord to render empty space
+        "\u200b"
     ]
     content = "\n".join(content_lines)
 
-    image_url = None
-    media = post_data.get("media")
-    if isinstance(media, list) and len(media) > 0 and isinstance(media[0], dict):
-        first_media = media[0]
-        # Only select actual image assets
-        candidates = [
-            first_media.get("thumbnail"),
-            first_media.get("largeUrl"),
-            first_media.get("originalUrl"),
-            post_data.get("imageUrl")
-        ]
-        for candidate in candidates:
-            if candidate and ("fbcdn.net" in candidate or any(ext in candidate.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"])):
-                image_url = candidate
-                break
-    elif post_data.get("imageUrl"):
-        image_url = post_data.get("imageUrl")
-    elif post_data.get("thumbnail"):
-        image_url = post_data.get("thumbnail")
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    }
 
-    # Image branch: Download raw bytes & upload to Discord as a permanent native attachment
+    media = post_data.get("media") or []
+    first_media = media[0] if (isinstance(media, list) and len(media) > 0 and isinstance(media[0], dict)) else {}
+
+    # 1. Look for direct video links (for Reels/Videos)
+    video_url = (
+        post_data.get("videoUrl")
+        or post_data.get("downloadUrl")
+        or first_media.get("videoUrl")
+        or first_media.get("downloadUrl")
+    )
+
+    # 2. Look for image/thumbnail links
+    image_url = None
+    candidates = [
+        first_media.get("thumbnail"),
+        first_media.get("largeUrl"),
+        first_media.get("originalUrl"),
+        post_data.get("imageUrl")
+    ]
+    for candidate in candidates:
+        if candidate and ("fbcdn.net" in candidate or any(ext in candidate.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"])):
+            image_url = candidate
+            break
+
+    # ATTEMPT 1: Video Upload (Playable Reel)
+    if video_url:
+        try:
+            print(f"Detected video Reel URL. Attempting stream download...")
+            with requests.get(video_url, headers=headers, stream=True, timeout=45) as v_res:
+                if v_res.status_code == 200:
+                    video_bytes = io.BytesIO()
+                    total_bytes = 0
+                    max_limit = 24 * 1024 * 1024  # 24 MB Discord safety cap
+
+                    for chunk in v_res.iter_content(chunk_size=1024 * 64):
+                        total_bytes += len(chunk)
+                        if total_bytes > max_limit:
+                            print(f"Video exceeds Discord size limit ({total_bytes / (1024*1024):.1f}MB). Falling back to thumbnail.")
+                            video_bytes = None
+                            break
+                        video_bytes.write(chunk)
+
+                    if video_bytes:
+                        video_bytes.seek(0)
+                        payload = {"content": content}
+                        files = {
+                            "payload_json": (None, json.dumps(payload), "application/json"),
+                            "file": ("reel.mp4", video_bytes, "video/mp4")
+                        }
+                        res = requests.post(DISCORD_WEBHOOK_URL, files=files, timeout=60)
+                        print(f"Direct Discord upload (playable video): status {res.status_code}")
+                        return
+        except Exception as err:
+            print(f"Video upload failed, falling back to image/thumbnail: {err}")
+
+    # ATTEMPT 2: Image / Reel Thumbnail Upload
     if image_url:
         try:
             download_headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                **headers,
                 "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
             }
             img_res = requests.get(image_url, headers=download_headers, timeout=20)
             if img_res.status_code == 200:
                 payload = {
                     "content": content,
-                    "embeds": [
-                        {
-                            "image": {
-                                "url": "attachment://post_image.jpg"
-                            }
-                        }
-                    ]
+                    "embeds": [{"image": {"url": "attachment://post_image.jpg"}}]
                 }
                 files = {
                     "payload_json": (None, json.dumps(payload), "application/json"),
                     "files[0]": ("post_image.jpg", io.BytesIO(img_res.content), "image/jpeg")
                 }
                 res = requests.post(DISCORD_WEBHOOK_URL, files=files, timeout=30)
-                print(f"Direct Discord upload (image): status {res.status_code}")
+                print(f"Direct Discord upload (image/thumbnail): status {res.status_code}")
                 return
-            else:
-                print(f"Image download returned status {img_res.status_code}, falling back to text.")
         except Exception as err:
             print(f"Failed to attach image to Discord, falling back to text: {err}")
 
-    # Fallback / Text-only branch
+    # ATTEMPT 3: Text Only Fallback
     payload = {"content": content}
     res = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=30)
     print(f"Direct Discord upload (text): status {res.status_code}")
