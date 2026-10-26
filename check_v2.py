@@ -85,7 +85,7 @@ def send_to_discord(post_data):
         f"<{post_url}>",
         "",
         post_text,
-        ""
+        "\u200b"  # Invisible character that forces Discord to render empty space
     ]
     content = "\n".join(content_lines).strip()
 
