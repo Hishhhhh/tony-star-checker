@@ -101,7 +101,11 @@ def send_to_discord(post_data):
     # Image branch: Download raw bytes & upload to Discord as a permanent native attachment
     if image_url:
         try:
-            img_res = requests.get(image_url, timeout=20)
+            download_headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+            }
+            img_res = requests.get(image_url, headers=download_headers, timeout=20)
             if img_res.status_code == 200:
                 payload = {
                     "content": content,
@@ -120,6 +124,8 @@ def send_to_discord(post_data):
                 res = requests.post(DISCORD_WEBHOOK_URL, files=files, timeout=30)
                 print(f"Direct Discord upload (image): status {res.status_code}")
                 return
+            else:
+                print(f"Image download returned status {img_res.status_code}, falling back to text.")
         except Exception as err:
             print(f"Failed to attach image to Discord, falling back to text: {err}")
 
