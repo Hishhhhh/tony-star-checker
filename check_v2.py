@@ -2,9 +2,17 @@ import io
 import json
 import os
 import re
+import socket
 import time
 from datetime import datetime
 import requests
+import urllib3.util.connection as urllib3_cn
+
+# Force urllib3 to only use IPv4 (fixes GitHub Actions [Errno 101] Network is unreachable)
+def allowed_gai_family():
+    return socket.AF_INET
+
+urllib3_cn.allowed_gai_family = allowed_gai_family
 
 APIFY_TOKEN = os.environ.get("APIFY_TOKEN")
 APIFY_TASK_ID = os.environ.get("APIFY_TASK_ID")
