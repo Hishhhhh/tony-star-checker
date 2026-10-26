@@ -1,0 +1,30 @@
+name: Test Post Delivery from Apify JSON
+
+on:
+  workflow_dispatch:
+    inputs:
+      post_json:
+        description: 'Paste single post JSON from Apify run dataset'
+        required: true
+
+jobs:
+  test-delivery:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install requests urllib3
+
+      - name: Execute Delivery Test
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          POST_JSON_DATA: ${{ github.event.inputs.post_json }}
+        run: |
+          python test_json_delivery.py
