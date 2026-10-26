@@ -20,7 +20,6 @@ urllib3_cn.allowed_gai_family = allowed_gai_family
 APIFY_TOKEN = os.environ.get("APIFY_TOKEN")
 APIFY_TASK_ID = os.environ.get("APIFY_TASK_ID")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
-MAKE_WEBHOOK_URL = os.environ.get("MAKE_WEBHOOK_URL")
 
 # Profile URL to monitor
 PROFILE_URL = "https://www.facebook.com/people/Anthony-Martin/61593822099768/"
@@ -240,16 +239,6 @@ def send_to_discord(post_data):
     print(f"Direct Discord upload (text): status {res.status_code}")
 
 
-def send_to_make(post_data, post_id):
-    if not MAKE_WEBHOOK_URL:
-        return
-    try:
-        res = requests.post(MAKE_WEBHOOK_URL, json=post_data, timeout=30)
-        print(f"Sent post {post_id} to Make: status {res.status_code}")
-    except Exception as e:
-        print(f"Error sending post {post_id} to Make: {e}")
-
-
 def main():
     seen_ids = load_seen_ids()
     old_post_id = load_latest_post_id()
@@ -292,7 +281,6 @@ def main():
     # Process oldest to newest if multiple posts showed up
     for p_id, post_data in reversed(new_posts):
         send_to_discord(post_data)
-        # send_to_make(post_data, p_id)
         append_seen_id(p_id)
         seen_ids.add(p_id)
 
