@@ -77,7 +77,7 @@ def send_to_discord(post_data):
         f"<{post_url}>",
         "",
         post_text,
-        "--"
+        ""
     ]
     content = "\n".join(content_lines).strip()
 
