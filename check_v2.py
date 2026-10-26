@@ -1,11 +1,15 @@
+import io
+import json
 import os
 import re
-import requests
 import time
+from datetime import datetime
+import requests
 
 APIFY_TOKEN = os.environ.get("APIFY_TOKEN")
 APIFY_TASK_ID = os.environ.get("APIFY_TASK_ID")
 MAKE_TEST_WEBHOOK_URL = os.environ.get("MAKE_TEST_WEBHOOK_URL")
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
 RAW_URL = "https://www.facebook.com/profile.php?id=61593822099768"
 STATE_FILE = "latest_post_v2.txt"
@@ -34,7 +38,6 @@ def save_seen_ids(seen_ids):
 
 def fetch_apify_task_results():
     print("Change detected on profile! Running Apify task synchronously...")
-    # This runs the task and directly waits to return the items in 1 request
     endpoint = f"https://api.apify.com/v2/actor-tasks/{APIFY_TASK_ID}/run-sync-get-dataset-items?token={APIFY_TOKEN}"
     response = requests.post(endpoint, json={}, timeout=180)
     
@@ -44,6 +47,78 @@ def fetch_apify_task_results():
     else:
         print(f"Failed to run Apify: {response.status_code} - {response.text}")
         return []
+
+def get_unix_timestamp(time_val):
+    if not time_val:
+        return int(time.time())
+    if isinstance(time_val, (int, float)):
+        return int(time_val)
+    try:
+        dt = datetime.fromisoformat(str(time_val).replace("Z", "+00:00"))
+        return int(dt.timestamp())
+    except Exception:
+        return int(time.time())
+
+def send_to_discord(post_data):
+    if not DISCORD_WEBHOOK_URL:
+        print("Skipping direct Discord post (DISCORD_WEBHOOK_URL secret not set).")
+        return
+
+    post_time = post_data.get("time") or post_data.get("timestamp")
+    unix_time = get_unix_timestamp(post_time)
+
+    post_url = post_data.get("url") or post_data.get("postUrl") or ""
+    post_text = post_data.get("text") or post_data.get("postText") or ""
+
+    content_lines = [
+        "------------------------------------",
+        f"**POSTED:** <t:{unix_time}:f> (<t:{unix_time}:R>)",
+        "",
+        f"<{post_url}>",
+        "",
+        post_text,
+        "--"
+    ]
+    content = "\n".join(content_lines).strip()
+
+    image_url = None
+    media = post_data.get("media")
+    if isinstance(media, list) and len(media) > 0 and isinstance(media[0], dict):
+        image_url = media[0].get("thumbnail") or media[0].get("url")
+    elif post_data.get("thumbnail"):
+        image_url = post_data.get("thumbnail")
+    elif post_data.get("imageUrl"):
+        image_url = post_data.get("imageUrl")
+
+    # Image branch: Download raw bytes & upload to Discord as a permanent native attachment
+    if image_url:
+        try:
+            img_res = requests.get(image_url, timeout=20)
+            if img_res.status_code == 200:
+                payload = {
+                    "content": content,
+                    "embeds": [
+                        {
+                            "image": {
+                                "url": "attachment://post_image.jpg"
+                            }
+                        }
+                    ]
+                }
+                files = {
+                    "payload_json": (None, json.dumps(payload), "application/json"),
+                    "files[0]": ("post_image.jpg", io.BytesIO(img_res.content), "image/jpeg")
+                }
+                res = requests.post(DISCORD_WEBHOOK_URL, files=files, timeout=30)
+                print(f"Direct Discord upload (image): status {res.status_code}")
+                return
+        except Exception as err:
+            print(f"Failed to attach image to Discord, falling back to text: {err}")
+
+    # Fallback / Text-only branch
+    payload = {"content": content}
+    res = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=30)
+    print(f"Direct Discord upload (text): status {res.status_code}")
 
 def process_and_send_posts():
     scraped_posts = fetch_apify_task_results()
@@ -55,31 +130,34 @@ def process_and_send_posts():
     new_posts = []
 
     for post in scraped_posts:
-        # Pull whatever ID key Apify provides (id, postId, url, etc.)
         post_id = str(post.get("id") or post.get("postId") or post.get("postUrl") or post.get("url") or "")
         if post_id and post_id not in seen_ids:
             new_posts.append((post_id, post))
 
     if not new_posts:
         print("Profile change detected, but every post was already in seen_ids.txt (likely a deletion).")
-        print("Skipped calling Make. 0 Make operations used.")
+        print("Skipped triggers. 0 ops used.")
         return
 
-    print(f"Found {len(new_posts)} genuine new post(s)! Sending to Make...")
+    print(f"Found {len(new_posts)} genuine new post(s)!")
 
-    # Reverse so the oldest post posts first, newest last
+    # Reverse so oldest sends first, newest last
     new_posts.reverse()
 
     for post_id, post_data in new_posts:
+        # 1. Deliver to Discord directly (permanent attachment)
+        send_to_discord(post_data)
+
+        # 2. Deliver to Make as fallback/comparison
         if MAKE_TEST_WEBHOOK_URL:
             try:
                 res = requests.post(MAKE_TEST_WEBHOOK_URL, json=post_data, timeout=30)
                 print(f"Sent post {post_id} to Make: status {res.status_code}")
             except Exception as err:
                 print(f"Failed to post {post_id} to Make: {err}")
-        # Add to seen IDs once sent
+
         seen_ids.add(post_id)
-        time.sleep(2)  # Gives Discord time to breathe between messages
+        time.sleep(2)  # Discord rate limit buffer
 
     save_seen_ids(seen_ids)
     print("Finished. Updated seen_ids.txt.")
@@ -123,11 +201,10 @@ def main():
         if latest_id != last_seen:
             print(f"Change detected! (Old: '{last_seen}' -> New: '{latest_id}')")
             
-            # Check if this ID has already been seen in history (deletion guard)
             seen_ids = load_seen_ids()
             if latest_id in seen_ids:
                 print(f"Post {latest_id} is already in seen_ids.txt — a newer post was likely deleted.")
-                print("Updating latest_post_v2.txt without running Apify. 0 Apify spend, 0 Make ops!")
+                print("Updating latest_post_v2.txt without running Apify. 0 Apify spend!")
                 save_last_seen(latest_id)
                 return
 
