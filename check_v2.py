@@ -87,7 +87,7 @@ def send_to_discord(post_data):
         post_text,
         "\u200b"  # Invisible character that forces Discord to render empty space
     ]
-    content = "\n".join(content_lines).strip()
+    content = "\n".join(content_lines)
 
     image_url = None
     media = post_data.get("media")
