@@ -292,7 +292,7 @@ def main():
     # Process oldest to newest if multiple posts showed up
     for p_id, post_data in reversed(new_posts):
         send_to_discord(post_data)
-        send_to_make(post_data, p_id)
+        # send_to_make(post_data, p_id)
         append_seen_id(p_id)
         seen_ids.add(p_id)
 
