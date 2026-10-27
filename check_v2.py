@@ -25,7 +25,6 @@ DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 PROFILE_URL = "https://www.facebook.com/people/Anthony-Martin/61593822099768/"
 
 # Tracking files
-LATEST_POST_FILE = "latest_post_v2.txt"
 SEEN_IDS_FILE = "seen_ids.txt"
 
 HEADERS = {
@@ -52,19 +51,6 @@ def load_seen_ids():
 
 def append_seen_id(post_id):
     with open(SEEN_IDS_FILE, "a", encoding="utf-8") as f:
-        f.write(f"{post_id}\n")
-
-
-def load_latest_post_id():
-    if not os.path.exists(LATEST_POST_FILE):
-        return None
-    with open(LATEST_POST_FILE, "r", encoding="utf-8") as f:
-        content = f.read().strip()
-        return content if content else None
-
-
-def save_latest_post_id(post_id):
-    with open(LATEST_POST_FILE, "w", encoding="utf-8") as f:
         f.write(f"{post_id}\n")
 
 
@@ -255,22 +241,20 @@ def send_to_discord(post_data):
 
 def main():
     seen_ids = load_seen_ids()
-    old_post_id = load_latest_post_id()
 
     page_ids = fetch_all_post_ids_from_profile()
     if not page_ids:
         print("Could not retrieve profile post IDs. Exiting.")
         sys.exit(0)
 
-    # First run ever initialization
-    if not seen_ids and old_post_id is None:
-        print(f"First run initialized. Storing initial IDs: {page_ids[:5]}")
+    # First run ever initialization (seeds the file so it doesn't dump whole history)
+    if not seen_ids:
+        print(f"First run initialized. Seeding initial IDs: {page_ids}")
         for pid in page_ids:
             append_seen_id(pid)
-        save_latest_post_id(page_ids[0])
         sys.exit(0)
 
-    # Find if ANY ID visible on the page is genuinely unseen
+    # Check if ANY visible ID has not been seen before
     unseen_page_ids = [pid for pid in page_ids if pid not in seen_ids]
 
     if not unseen_page_ids:
@@ -285,7 +269,6 @@ def main():
         for pid in unseen_page_ids:
             append_seen_id(pid)
             seen_ids.add(pid)
-        save_latest_post_id(unseen_page_ids[0])
         sys.exit(0)
 
     # Process items returned by Apify that haven't been delivered yet
@@ -302,13 +285,12 @@ def main():
         append_seen_id(p_id)
         seen_ids.add(p_id)
 
-    # Record all IDs seen on the page so out-of-order items never re-trigger
+    # Record all IDs seen on the page so reordered items never re-trigger
     for pid in unseen_page_ids:
         if pid not in seen_ids:
             append_seen_id(pid)
             seen_ids.add(pid)
 
-    save_latest_post_id(page_ids[0])
     print("Finished. Updated seen_ids.txt.")
 
 
