@@ -188,20 +188,27 @@ def send_to_discord(post_data):
                 if os.path.exists(temp_video):
                     os.remove(temp_video)
 
-    # BRANCH 2: High-res thumbnail / photo embed / profile picture
+    # BRANCH 2: High-res thumbnail / photo embed
     image_url = None
     user_data = post_data.get("user") or {}
 
+    # Standard post image candidates
     candidates = [
         first_media.get("thumbnail"),
         first_media.get("largeUrl"),
         first_media.get("originalUrl"),
         post_data.get("imageUrl"),
         post_data.get("image"),
-        user_data.get("profilePic"),
-        user_data.get("profile_picture"),
-        post_data.get("profilePicture"),
     ]
+
+    # Only look at the avatar/profilePic if this post is an actual profile picture update
+    is_pfp_update = "profile picture" in post_text.lower() or "profile photo" in post_text.lower()
+    if is_pfp_update:
+        candidates.extend([
+            user_data.get("profilePic"),
+            user_data.get("profile_picture"),
+            post_data.get("profilePicture"),
+        ])
 
     for candidate in candidates:
         if candidate and isinstance(candidate, str):
