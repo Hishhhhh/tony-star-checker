@@ -84,7 +84,6 @@ def fetch_all_post_ids_from_profile():
 
 
 def run_apify_task():
-    print("Change detected on profile! Running Apify task synchronously...")
     endpoint = f"https://api.apify.com/v2/actor-tasks/{APIFY_TASK_ID}/run-sync-get-dataset-items?token={APIFY_TOKEN}"
     try:
         res = requests.post(endpoint, timeout=180)
