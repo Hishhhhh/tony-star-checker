@@ -68,28 +68,33 @@ def save_latest_post_id(post_id):
         f.write(f"{post_id}\n")
 
 
-def fetch_latest_post_id_from_profile():
+def fetch_all_post_ids_from_profile():
     session = requests.Session()
     session.headers.update(HEADERS)
     try:
         res = session.get(PROFILE_URL, timeout=15)
         if res.status_code != 200:
             print(f"Failed to fetch profile: HTTP {res.status_code}")
-            return None
+            return []
 
-        # Look for raw post/reel IDs inside public HTML scripts
-        matches = re.findall(r'"post_id":"(\d+)"', res.text)
-        if not matches:
-            matches = re.findall(r'/posts/(\d+)', res.text)
-        if not matches:
-            matches = re.findall(r'/reel/(\d+)', res.text)
+        # Find all post/reel IDs visible in HTML scripts and tags
+        matches = []
+        matches.extend(re.findall(r'"post_id":"(\d+)"', res.text))
+        matches.extend(re.findall(r'/posts/(\d+)', res.text))
+        matches.extend(re.findall(r'/reel/(\d+)', res.text))
 
-        if matches:
-            return matches[0]
-        return None
+        # Preserve order while removing duplicates
+        seen_in_page = set()
+        unique_ids = []
+        for pid in matches:
+            if pid not in seen_in_page:
+                seen_in_page.add(pid)
+                unique_ids.append(pid)
+
+        return unique_ids
     except Exception as e:
         print(f"Error checking profile: {e}")
-        return None
+        return []
 
 
 def run_apify_task():
@@ -125,7 +130,7 @@ def download_reel_with_ytdlp(url, output_filename="reel.mp4"):
         "outtmpl": output_filename,
         "quiet": True,
         "no_warnings": True,
-        "max_filesize": 24 * 1024 * 1024,  # Cap under Discord 25 MB limit
+        "max_filesize": 24 * 1024 * 1024,  # Cap under Discord 25MB limit
     }
     try:
         print(f"Attempting video download via yt-dlp for: {url}")
@@ -197,18 +202,27 @@ def send_to_discord(post_data):
                 if os.path.exists(temp_video):
                     os.remove(temp_video)
 
-    # BRANCH 2: Fallback to high-res thumbnail / photo embed
+    # BRANCH 2: High-res thumbnail / photo embed / profile picture
     image_url = None
+    user_data = post_data.get("user") or {}
+
     candidates = [
         first_media.get("thumbnail"),
         first_media.get("largeUrl"),
         first_media.get("originalUrl"),
         post_data.get("imageUrl"),
+        post_data.get("image"),
+        user_data.get("profilePic"),
+        user_data.get("profile_picture"),
+        post_data.get("profilePicture"),
     ]
+
     for candidate in candidates:
-        if candidate and ("fbcdn.net" in str(candidate) or any(ext in str(candidate).lower() for ext in [".jpg", ".jpeg", ".png", ".webp"])):
-            image_url = candidate
-            break
+        if candidate and isinstance(candidate, str):
+            candidate_clean = candidate.strip()
+            if "fbcdn.net" in candidate_clean or any(ext in candidate_clean.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
+                image_url = candidate_clean
+                break
 
     if image_url:
         try:
@@ -243,48 +257,58 @@ def main():
     seen_ids = load_seen_ids()
     old_post_id = load_latest_post_id()
 
-    current_id = fetch_latest_post_id_from_profile()
-    if not current_id:
-        print("Could not retrieve current profile post ID. Exiting.")
+    page_ids = fetch_all_post_ids_from_profile()
+    if not page_ids:
+        print("Could not retrieve profile post IDs. Exiting.")
         sys.exit(0)
 
-    print(f"Latest post ID seen: {current_id}")
-
-    # If first run ever
-    if old_post_id is None:
-        print(f"First run initialized. Storing initial ID: {current_id}")
-        save_latest_post_id(current_id)
-        append_seen_id(current_id)
+    # First run ever initialization
+    if not seen_ids and old_post_id is None:
+        print(f"First run initialized. Storing initial IDs: {page_ids[:5]}")
+        for pid in page_ids:
+            append_seen_id(pid)
+        save_latest_post_id(page_ids[0])
         sys.exit(0)
 
-    if current_id == old_post_id:
-        print("No change detected on profile.")
+    # Find if ANY ID visible on the page is genuinely unseen
+    unseen_page_ids = [pid for pid in page_ids if pid not in seen_ids]
+
+    if not unseen_page_ids:
+        print("No new posts detected on profile (all visible IDs have been seen).")
         sys.exit(0)
 
-    print(f"Change detected! (Old: '{old_post_id}' -> New: '{current_id}')")
+    print(f"Genuine new post ID(s) detected: {unseen_page_ids}! Running Apify...")
 
     items = run_apify_task()
     if not items:
-        print("Apify dataset was empty or failed. Updating latest post ID to prevent loops.")
-        save_latest_post_id(current_id)
+        print("Apify dataset was empty or failed. Storing detected IDs to prevent retry loops.")
+        for pid in unseen_page_ids:
+            append_seen_id(pid)
+            seen_ids.add(pid)
+        save_latest_post_id(unseen_page_ids[0])
         sys.exit(0)
 
-    # Filter out posts already processed
+    # Process items returned by Apify that haven't been delivered yet
     new_posts = []
     for item in items:
         p_id = str(item.get("postId") or item.get("id") or "")
         if p_id and p_id not in seen_ids:
             new_posts.append((p_id, item))
 
-    print(f"Found {len(new_posts)} genuine new post(s)!")
+    print(f"Found {len(new_posts)} genuine new post(s) to deliver!")
 
-    # Process oldest to newest if multiple posts showed up
     for p_id, post_data in reversed(new_posts):
         send_to_discord(post_data)
         append_seen_id(p_id)
         seen_ids.add(p_id)
 
-    save_latest_post_id(current_id)
+    # Record all IDs seen on the page so out-of-order items never re-trigger
+    for pid in unseen_page_ids:
+        if pid not in seen_ids:
+            append_seen_id(pid)
+            seen_ids.add(pid)
+
+    save_latest_post_id(page_ids[0])
     print("Finished. Updated seen_ids.txt.")
 
 
