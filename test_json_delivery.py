@@ -108,35 +108,50 @@ def send_to_discord(post_data):
                 if os.path.exists(video_file):
                     os.remove(video_file)
 
-    # BRANCH 2: Fallback to high-res thumbnail preview
+    # BRANCH 2: High-res thumbnail / photo embed
     image_url = None
+    user_data = post_data.get("user") or {}
+
     candidates = [
         first_media.get("thumbnail"),
         first_media.get("largeUrl"),
         first_media.get("originalUrl"),
-        post_data.get("imageUrl")
+        post_data.get("imageUrl"),
+        post_data.get("image"),
     ]
+
+    # Only look at the avatar if this is an actual profile picture update
+    is_pfp_update = "profile picture" in post_text.lower() or "profile photo" in post_text.lower()
+    if is_pfp_update:
+        candidates.extend([
+            user_data.get("profilePic"),
+            user_data.get("profile_picture"),
+            post_data.get("profilePicture"),
+        ])
+
     for candidate in candidates:
-        if candidate and ("fbcdn.net" in str(candidate) or any(ext in str(candidate).lower() for ext in [".jpg", ".jpeg", ".png", ".webp"])):
-            image_url = candidate
-            break
+        if candidate and isinstance(candidate, str):
+            candidate_clean = candidate.strip()
+            if "fbcdn.net" in candidate_clean or any(ext in candidate_clean.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
+                image_url = candidate_clean
+                break
 
     if image_url:
         try:
-            print(f"Downloading image/thumbnail asset: {image_url[:60]}...")
+            print(f"Downloading image asset: {image_url[:60]}...")
             download_headers = {
                 **headers,
-                "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+                "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
             }
             img_res = requests.get(image_url, headers=download_headers, timeout=20)
             if img_res.status_code == 200:
                 payload = {
                     "content": content,
-                    "embeds": [{"image": {"url": "attachment://post_image.jpg"}}]
+                    "embeds": [{"image": {"url": "attachment://post_image.jpg"}}],
                 }
                 files = {
                     "payload_json": (None, json.dumps(payload), "application/json"),
-                    "files[0]": ("post_image.jpg", io.BytesIO(img_res.content), "image/jpeg")
+                    "files[0]": ("post_image.jpg", io.BytesIO(img_res.content), "image/jpeg"),
                 }
                 res = requests.post(DISCORD_WEBHOOK_URL, files=files, timeout=30)
                 print(f"Direct Discord upload (image/thumbnail): status {res.status_code}")
