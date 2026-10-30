@@ -133,7 +133,7 @@ def download_reel_with_ytdlp(url, output_filename="reel.mp4"):
 
 
 def send_to_discord(post_data, target_url):
-    if not DISCORD_WEBHOOK_URL:
+    if not target_url:
         print("Warning: DISCORD_WEBHOOK_URL not configured.")
         return
 
