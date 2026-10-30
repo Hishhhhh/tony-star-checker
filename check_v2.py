@@ -19,7 +19,11 @@ urllib3_cn.allowed_gai_family = allowed_gai_family
 # Environment Secrets
 APIFY_TOKEN = os.environ.get("APIFY_TOKEN")
 APIFY_TASK_ID = os.environ.get("APIFY_TASK_ID")
-DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+DISCORD_WEBHOOK_URLS = [
+    url.strip()
+    for url in os.environ.get("DISCORD_WEBHOOK_URL", "").split(",")
+    if url.strip().startswith("https://")
+]
 
 # Profile URL to monitor
 PROFILE_URL = "https://www.facebook.com/people/Anthony-Martin/61593822099768/"
@@ -128,7 +132,7 @@ def download_reel_with_ytdlp(url, output_filename="reel.mp4"):
     return None
 
 
-def send_to_discord(post_data):
+def send_to_discord(post_data, target_url):
     if not DISCORD_WEBHOOK_URL:
         print("Warning: DISCORD_WEBHOOK_URL not configured.")
         return
@@ -176,7 +180,7 @@ def send_to_discord(post_data):
                         "payload_json": (None, json.dumps(payload), "application/json"),
                         "file": ("reel.mp4", f, "video/mp4"),
                     }
-                    res = requests.post(DISCORD_WEBHOOK_URL, files=files, timeout=90)
+                    res = requests.post(target_url, files=files, timeout=90)
                 print(f"Direct Discord upload (playable video): status {res.status_code}")
                 if os.path.exists(temp_video):
                     os.remove(temp_video)
@@ -233,7 +237,7 @@ def send_to_discord(post_data):
                     "payload_json": (None, json.dumps(payload), "application/json"),
                     "files[0]": ("post_image.jpg", io.BytesIO(img_res.content), "image/jpeg"),
                 }
-                res = requests.post(DISCORD_WEBHOOK_URL, files=files, timeout=30)
+                res = requests.post(target_url, files=files, timeout=30)
                 print(f"Direct Discord upload (image/thumbnail): status {res.status_code}")
                 return
         except Exception as err:
@@ -241,7 +245,7 @@ def send_to_discord(post_data):
 
     # BRANCH 3: Plain text
     payload = {"content": content}
-    res = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=30)
+    res = requests.post(target_url, json=payload, timeout=30)
     print(f"Direct Discord upload (text): status {res.status_code}")
 
 
@@ -287,7 +291,14 @@ def main():
     print(f"Found {len(new_posts)} genuine new post(s) to deliver!")
 
     for p_id, post_data in reversed(new_posts):
-        send_to_discord(post_data)
+        for i, webhook_url in enumerate(DISCORD_WEBHOOK_URLS):
+            print(f"Sending post {p_id} to webhook {i + 1}/{len(DISCORD_WEBHOOK_URLS)}...")
+            send_to_discord(post_data, target_url=webhook_url)
+
+            # 2-second polite delay before delivering to the next webhook
+            if i < len(DISCORD_WEBHOOK_URLS) - 1:
+                time.sleep(2)
+
         append_seen_id(p_id)
         seen_ids.add(p_id)
 
