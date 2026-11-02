@@ -81,6 +81,7 @@ def fetch_all_post_ids_from_profile():
                 seen_in_page.add(pid)
                 unique_ids.append(pid)
 
+        print(f"Debug: Facebook returned {len(unique_ids)} IDs: {unique_ids[:5]}")
         return unique_ids
     except Exception as e:
         print(f"Error checking profile: {e}")
