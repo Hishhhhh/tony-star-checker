@@ -191,10 +191,27 @@ if __name__ == "__main__":
         sys.exit(1)
 
     try:
-        data = json.loads(raw_input)
-        if isinstance(data, list) and len(data) > 0:
-            data = data[0]
-        send_to_discord(data)
+        decoder = json.JSONDecoder()
+        pos = 0
+        posts = []
+        while pos < len(raw_input):
+            # Skip whitespace or stray commas between pasted objects
+            while pos < len(raw_input) and raw_input[pos] in " \t\r\n,":
+                pos += 1
+            if pos >= len(raw_input):
+                break
+            obj, pos = decoder.raw_decode(raw_input, pos)
+            if isinstance(obj, list):
+                posts.extend(obj)
+            else:
+                posts.append(obj)
+
+        print(f"Loaded {len(posts)} post(s) to deliver...")
+        for i, post in enumerate(posts, 1):
+            print(f"--- Delivering post {i}/{len(posts)} ---")
+            send_to_discord(post)
+            if i < len(posts):
+                time.sleep(2)
     except Exception as e:
         print(f"JSON Parsing Error: {e}")
         sys.exit(1)
