@@ -16,10 +16,7 @@ def allowed_gai_family():
 
 urllib3_cn.allowed_gai_family = allowed_gai_family
 
-DISCORD_WEBHOOK_URL = (
-    os.environ.get("TEST_DISCORD_WEBHOOK_URL") 
-    or os.environ.get("DISCORD_WEBHOOK_URL")
-)
+DISCORD_WEBHOOK_URL = os.environ.get("TEST_DISCORD_WEBHOOK_URL")
 
 def get_unix_timestamp(time_val):
     if not time_val:
