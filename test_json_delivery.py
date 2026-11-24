@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import re
 import socket
 import sys
 import time
@@ -137,43 +138,46 @@ def send_to_discord(post_data):
                 break
 
     if image_url:
-        try:
-            print(f"Downloading image asset: {image_url[:60]}...")
-            download_headers = {
-                **headers,
-                "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-            }
-            img_res = requests.get(image_url, headers=download_headers, timeout=20)
-            if img_res.status_code == 200:
-                payload = {
-                    "content": content,
-                    "embeds": [{"image": {"url": "attachment://post_image.jpg"}}],
-                }
-                files = {
-                    "payload_json": (None, json.dumps(payload), "application/json"),
-                    "files[0]": ("post_image.jpg", io.BytesIO(img_res.content), "image/jpeg"),
-                }
-                res = requests.post(DISCORD_WEBHOOK_URL, files=files, timeout=30)
-                print(f"Direct Discord upload (image/thumbnail): status {res.status_code}")
-                return
-            else:
-                print(f"Image download returned HTTP {img_res.status_code}, falling back to URL embed...")
-                payload = {
-                    "content": content,
-                    "embeds": [{"image": {"url": image_url}}],
-                }
-                res = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=30)
-                print(f"Direct Discord upload (image URL embed): status {res.status_code}")
-                return
-        except Exception as err:
-            print(f"Image download error ({err}), falling back to URL embed...")
-            payload = {
-                "content": content,
-                "embeds": [{"image": {"url": image_url}}],
-            }
-            res = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=30)
-            print(f"Direct Discord upload (image URL embed): status {res.status_code}")
-            return
+        download_headers = {
+            **headers,
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        }
+        urls_to_try = [image_url]
+        # If regional edge hostname fails DNS, retry against Facebook's global scontent.xx.fbcdn.net edge
+        alt_url = re.sub(r"https://scontent\.[^/]+\.fbcdn\.net", "https://scontent.xx.fbcdn.net", image_url)
+        if alt_url != image_url:
+            urls_to_try.append(alt_url)
+
+        for attempt_url in urls_to_try:
+            try:
+                print(f"Downloading image asset: {attempt_url[:60]}...")
+                img_res = requests.get(attempt_url, headers=download_headers, timeout=20)
+                if img_res.status_code == 200 and len(img_res.content) > 0:
+                    payload = {
+                        "content": content,
+                        "embeds": [{"image": {"url": "attachment://post_image.jpg"}}],
+                    }
+                    files = {
+                        "payload_json": (None, json.dumps(payload), "application/json"),
+                        "files[0]": ("post_image.jpg", io.BytesIO(img_res.content), "image/jpeg"),
+                    }
+                    res = requests.post(DISCORD_WEBHOOK_URL, files=files, timeout=30)
+                    print(f"Direct Discord upload (image/thumbnail): status {res.status_code}")
+                    return
+                else:
+                    print(f"Image download returned HTTP {img_res.status_code}")
+            except Exception as err:
+                print(f"Image download error on {attempt_url[:45]}...: {err}")
+
+        # Final fallback if all downloads fail
+        print("All image downloads failed, falling back to URL embed...")
+        payload = {
+            "content": content,
+            "embeds": [{"image": {"url": urls_to_try[-1]}}],
+        }
+        res = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=30)
+        print(f"Direct Discord upload (image URL embed): status {res.status_code}")
+        return
 
     # BRANCH 3: Plain text fallback
     payload = {"content": content}
