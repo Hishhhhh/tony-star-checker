@@ -153,11 +153,27 @@ def send_to_discord(post_data):
                     "payload_json": (None, json.dumps(payload), "application/json"),
                     "files[0]": ("post_image.jpg", io.BytesIO(img_res.content), "image/jpeg"),
                 }
-                res = requests.post(DISCORD_WEBHOOK_URL, files=files, timeout=30)
+                res = requests.post(target_url, files=files, timeout=30)
                 print(f"Direct Discord upload (image/thumbnail): status {res.status_code}")
                 return
+            else:
+                print(f"Image download returned HTTP {img_res.status_code}, falling back to URL embed...")
+                payload = {
+                    "content": content,
+                    "embeds": [{"image": {"url": image_url}}],
+                }
+                res = requests.post(target_url, json=payload, timeout=30)
+                print(f"Direct Discord upload (image URL embed): status {res.status_code}")
+                return
         except Exception as err:
-            print(f"Image attachment failed, falling back to text: {err}")
+            print(f"Image download error ({err}), falling back to URL embed...")
+            payload = {
+                "content": content,
+                "embeds": [{"image": {"url": image_url}}],
+            }
+            res = requests.post(target_url, json=payload, timeout=30)
+            print(f"Direct Discord upload (image URL embed): status {res.status_code}")
+            return
 
     # BRANCH 3: Plain text fallback
     payload = {"content": content}
